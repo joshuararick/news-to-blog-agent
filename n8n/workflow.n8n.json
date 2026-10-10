@@ -1,0 +1,264 @@
+{
+  "name": "News → Claude → PayloadCMS blog drafts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "name": "Every Morning",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "every-morning"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1",
+              "name": "industry",
+              "value": "HVAC",
+              "type": "string"
+            },
+            {
+              "id": "2",
+              "name": "location",
+              "value": "Greenville SC",
+              "type": "string"
+            },
+            {
+              "id": "3",
+              "name": "payloadUrl",
+              "value": "https://YOUR-SITE.com",
+              "type": "string"
+            },
+            {
+              "id": "4",
+              "name": "collection",
+              "value": "posts",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ],
+      "id": "config"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://news.google.com/rss/search?q=' + encodeURIComponent($json.industry + ' ' + $json.location + ' when:7d') + '&hl=en-US&gl=US&ceid=US:en' }}",
+        "options": {}
+      },
+      "name": "Google News",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        0
+      ],
+      "id": "google-news"
+    },
+    {
+      "parameters": {
+        "operation": "removeItemRepeatedAcrossExecutions",
+        "dedupeValue": "={{ $json.link }}",
+        "options": {}
+      },
+      "name": "Skip Already Posted",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "skip-already-posted"
+    },
+    {
+      "parameters": {
+        "maxItems": 3
+      },
+      "name": "Keep 3 Newest",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        880,
+        0
+      ],
+      "id": "keep-3-newest"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 1024, system: 'You write short, friendly local-news blog posts for a ' + $('Config').first().json.industry + ' business in ' + $('Config').first().json.location + '. Use only facts from the headline given; never invent quotes, numbers or details. Reply as JSON: {\"title\": string, \"body\": string} where body is 200-400 words in plain paragraphs.', messages: [{ role: 'user', content: 'Headline: ' + $json.title + '\\nLink: ' + $json.link + '\\nPublished: ' + ($json.pubDate || '') }] }) }}",
+        "options": {}
+      },
+      "name": "Claude Writes Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "id": "claude-writes-post",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Anthropic (header x-api-key)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull {title, body} out of Claude's reply (tolerates extra text around the JSON)\nreturn $input.all().map((item, i) => {\n  const text = (item.json.content || []).find(c => c.type === 'text')?.text || '';\n  const post = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));\n  if (!post.title || !post.body) throw new Error('Claude reply missing title/body');\n  const story = $('Keep 3 Newest').all()[i].json;\n  return { json: { title: post.title, summary: post.body, sourceUrl: story.link, _status: 'draft' } };\n});"
+      },
+      "name": "Shape Post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "id": "shape-post"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.payloadUrl + '/api/' + $('Config').first().json.collection }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "name": "Save Draft to Payload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "save-draft-to-payload",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Payload (header Authorization: users API-Key ...)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Morning": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Google News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google News": {
+      "main": [
+        [
+          {
+            "node": "Skip Already Posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Already Posted": {
+      "main": [
+        [
+          {
+            "node": "Keep 3 Newest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep 3 Newest": {
+      "main": [
+        [
+          {
+            "node": "Claude Writes Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Writes Post": {
+      "main": [
+        [
+          {
+            "node": "Shape Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape Post": {
+      "main": [
+        [
+          {
+            "node": "Save Draft to Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

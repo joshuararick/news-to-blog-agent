@@ -1,0 +1,14 @@
+{
+  "name": "news-to-blog-agent",
+  "version": "1.0.0",
+  "description": "Daily AI blogging agent: local industry news -> Claude-written posts -> PayloadCMS drafts.",
+  "type": "module",
+  "bin": { "news-to-blog": "src/cli.js" },
+  "engines": { "node": ">=22.9" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/cli.js",
+    "preview": "node --env-file-if-exists=.env src/cli.js --dry-run --verbose",
+    "test": "node --test \"tests/*.test.js\"",
+    "check": "node --check src/cli.js && npm test"
+  }
+}
