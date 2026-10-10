@@ -16,10 +16,11 @@ Ships two ways, same logic:
 ## Quick start (Node.js)
 
 ```bash
-cp .env.example .env        # add your Anthropic key, industry, location
+cp .env.example .env        # add your AI key, industry, location
+npm run doctor              # checks your setup in seconds (free: no AI calls, nothing posted)
 npm run preview             # dry run: prints posts, saves nothing
 npm start                   # real run: saves drafts to PayloadCMS
-npm test                    # 51 tests, no network needed
+npm test                    # 58 tests, no network needed
 ```
 
 Requires Node 22.9+. **No dependencies.** Only the Node standard library.
