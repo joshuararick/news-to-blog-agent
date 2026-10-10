@@ -8,6 +8,8 @@
 
 import { ConfigurationError } from './support/errors.js';
 
+export const SUPPORTED_AI_PROVIDERS = ['anthropic', 'openrouter'];
+export const DEFAULT_AI_PROVIDER = 'anthropic';
 export const DEFAULT_CLAUDE_MODEL = 'claude-haiku-5-5';
 export const DEFAULT_MAXIMUM_POSTS_PER_RUN = 3;
 export const DEFAULT_NEWS_LOOKBACK_DAYS = 7;
@@ -23,7 +25,8 @@ export const DEFAULT_SEEN_STORIES_FILE = '.seen-stories.json';
  * @property {boolean} isDryRun - Print posts instead of saving them to the CMS.
  * @property {boolean} isVerbose - Show debug log lines.
  * @property {string} seenStoriesFilePath - Where already-posted links are remembered.
- * @property {{ apiKey: string, model: string }} claude
+ * @property {{ provider: 'anthropic' | 'openrouter', apiKey: string, model: string }} writer
+ *           - Which AI writes the posts, and the credentials for it.
  * @property {{ baseUrl: string, apiKey: string, collection: string } | null} payload
  *           - Null during a dry run, when no CMS is needed.
  */
@@ -83,6 +86,39 @@ function requireEnvironmentVariable(environment, variableName) {
 }
 
 /**
+ * Read the AI provider settings. Each provider needs its own key; OpenRouter
+ * also needs a model slug because it fronts hundreds of models and model names
+ * change often — picking one is a deliberate choice, not a hidden default.
+ *
+ * @param {Record<string, string | undefined>} environment
+ * @param {string | boolean | undefined} providerFlag - The --ai-provider flag, if given.
+ * @returns {{ provider: string, apiKey: string, model: string }}
+ */
+function readWriterSettings(environment, providerFlag) {
+  const provider = String(providerFlag ?? environment.AI_PROVIDER ?? DEFAULT_AI_PROVIDER).trim().toLowerCase();
+
+  if (provider === 'anthropic') {
+    return {
+      provider,
+      apiKey: requireEnvironmentVariable(environment, 'ANTHROPIC_API_KEY'),
+      model: environment.CLAUDE_MODEL?.trim() || DEFAULT_CLAUDE_MODEL,
+    };
+  }
+
+  if (provider === 'openrouter') {
+    const model = environment.OPENROUTER_MODEL?.trim();
+    if (!model) {
+      throw new ConfigurationError(
+        'Missing OPENROUTER_MODEL. Pick a model slug like "<provider>/<model>" from https://openrouter.ai/models');
+    }
+    return { provider, apiKey: requireEnvironmentVariable(environment, 'OPENROUTER_API_KEY'), model };
+  }
+
+  throw new ConfigurationError(
+    `Unknown AI provider "${provider}". Use one of: ${SUPPORTED_AI_PROVIDERS.join(', ')}`);
+}
+
+/**
  * Build the validated configuration for one pipeline run.
  * Command-line flags win over environment variables, which win over defaults.
  *
@@ -118,10 +154,7 @@ export function loadConfig({ environment, commandLineArguments }) {
     isDryRun,
     isVerbose: flags.verbose === true,
     seenStoriesFilePath: environment.SEEN_STORIES_FILE?.trim() || DEFAULT_SEEN_STORIES_FILE,
-    claude: Object.freeze({
-      apiKey: requireEnvironmentVariable(environment, 'ANTHROPIC_API_KEY'),
-      model: environment.CLAUDE_MODEL?.trim() || DEFAULT_CLAUDE_MODEL,
-    }),
+    writer: Object.freeze(readWriterSettings(environment, flags['ai-provider'])),
     payload: payloadSettings && Object.freeze(payloadSettings),
   });
 }

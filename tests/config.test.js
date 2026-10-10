@@ -23,7 +23,8 @@ test('builds a full config from the environment with sensible defaults', () => {
   const config = loadConfig({ environment: COMPLETE_ENVIRONMENT, commandLineArguments: [] });
   assert.equal(config.industry, 'HVAC');
   assert.equal(config.maximumPostsPerRun, 3);
-  assert.equal(config.claude.model, DEFAULT_CLAUDE_MODEL);
+  assert.equal(config.writer.provider, 'anthropic');
+  assert.equal(config.writer.model, DEFAULT_CLAUDE_MODEL);
   assert.equal(config.payload.baseUrl, 'https://site.example', 'trailing slash removed');
   assert.equal(config.payload.collection, 'posts');
   assert.equal(Object.isFrozen(config), true);
@@ -52,4 +53,24 @@ test('clear errors for missing or invalid settings', () => {
   assert.throws(() => loadConfig({ environment: environmentWithoutClaudeKey, commandLineArguments: [] }), /Missing ANTHROPIC_API_KEY/);
   assert.throws(() => loadConfig({ environment: { ...COMPLETE_ENVIRONMENT, NEWS_LOCATION: '' }, commandLineArguments: [] }), /--location/);
   assert.throws(() => loadConfig({ environment: COMPLETE_ENVIRONMENT, commandLineArguments: ['--max-posts', 'lots'] }), /whole number/);
+});
+
+test('OpenRouter needs its own key and an explicit model', () => {
+  const openRouterEnvironment = {
+    ...COMPLETE_ENVIRONMENT, AI_PROVIDER: 'OpenRouter', OPENROUTER_API_KEY: 'or-key', OPENROUTER_MODEL: 'vendor/model-x',
+  };
+  const config = loadConfig({ environment: openRouterEnvironment, commandLineArguments: [] });
+  assert.deepEqual({ ...config.writer }, { provider: 'openrouter', apiKey: 'or-key', model: 'vendor/model-x' });
+
+  const { OPENROUTER_MODEL, ...withoutModel } = openRouterEnvironment;
+  assert.throws(() => loadConfig({ environment: withoutModel, commandLineArguments: [] }), /OPENROUTER_MODEL/);
+});
+
+test('the --ai-provider flag wins, and unknown providers are rejected', () => {
+  assert.throws(
+    () => loadConfig({ environment: COMPLETE_ENVIRONMENT, commandLineArguments: ['--ai-provider', 'openrouter'] }),
+    /OPENROUTER_MODEL/);
+  assert.throws(
+    () => loadConfig({ environment: { ...COMPLETE_ENVIRONMENT, AI_PROVIDER: 'skynet' }, commandLineArguments: [] }),
+    /Unknown AI provider "skynet"/);
 });

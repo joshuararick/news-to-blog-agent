@@ -25,13 +25,15 @@
  * @param {object} dependencies
  * @param {import('./config.js').PipelineConfig} dependencies.config
  * @param {{ findRecentStories: Function }} dependencies.newsSource
- * @param {{ writePostAbout: Function }} dependencies.postWriter
+ * @param {{ writePostAbout: Function, description: string }} dependencies.postWriter
  * @param {{ publish: Function, description: string }} dependencies.publisher
  * @param {{ hasSeen: Function, remember: Function, save: Function }} dependencies.seenStoryStore
  * @param {import('./support/logger.js').Logger} dependencies.logger
  * @returns {Promise<RunSummary>}
  */
 export async function runNewsToBlogPipeline({ config, newsSource, postWriter, publisher, seenStoryStore, logger }) {
+  logger.debug(`Writer: ${postWriter.description ?? 'custom'} · Publisher: ${publisher.description}`);
+
   // 1. SOURCE — find recent stories.
   logger.info(`Looking for ${config.industry} news in ${config.location} from the last ${config.newsLookbackDays} days`);
   const foundStories = await newsSource.findRecentStories({

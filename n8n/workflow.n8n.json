@@ -1,5 +1,5 @@
 {
-  "name": "News → Claude → PayloadCMS blog drafts",
+  "name": "News → AI (OpenRouter) → PayloadCMS blog drafts",
   "nodes": [
     {
       "parameters": {
@@ -47,6 +47,12 @@
               "name": "collection",
               "value": "posts",
               "type": "string"
+            },
+            {
+              "id": "5",
+              "name": "aiModel",
+              "value": "PICK-FROM-openrouter.ai/models",
+              "type": "string"
             }
           ]
         },
@@ -73,7 +79,10 @@
         440,
         0
       ],
-      "id": "google-news"
+      "id": "google-news",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -106,41 +115,44 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
+              "name": "X-Title",
+              "value": "News-to-Blog Agent"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'claude-haiku-5-5', max_tokens: 1024, system: 'You write short, friendly local-news blog posts for a ' + $('Config').first().json.industry + ' business in ' + $('Config').first().json.location + '. Use only facts from the headline given; never invent quotes, numbers or details. Reply as JSON: {\"title\": string, \"body\": string} where body is 200-400 words in plain paragraphs.', messages: [{ role: 'user', content: 'Headline: ' + $json.title + '\\nLink: ' + $json.link + '\\nPublished: ' + ($json.pubDate || '') }] }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: $('Config').first().json.aiModel, max_tokens: 1024, messages: [{ role: 'system', content: 'You write short, friendly local-news blog posts for a ' + $('Config').first().json.industry + ' business in ' + $('Config').first().json.location + '. Rules: Use only the facts in the story details you are given. Never invent quotes, numbers, names or events. 200 to 400 words, plain paragraphs, no markdown headings. Reply with JSON only, shaped exactly like: {\"title\": \"...\", \"body\": \"...\"}' }, { role: 'user', content: 'Headline: ' + $json.title + '\\nLink: ' + $json.link + '\\nPublished: ' + ($json.pubDate || 'unknown') } ] }) }}",
         "options": {}
       },
-      "name": "Claude Writes Post",
+      "name": "AI Writes Post (OpenRouter)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         1100,
         0
       ],
-      "id": "claude-writes-post",
+      "id": "ai-writes-post",
       "credentials": {
         "httpHeaderAuth": {
           "id": "",
-          "name": "Anthropic (header x-api-key)"
+          "name": "OpenRouter (header Authorization: Bearer <key>)"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
-        "jsCode": "// Pull {title, body} out of Claude's reply (tolerates extra text around the JSON)\nreturn $input.all().map((item, i) => {\n  const text = (item.json.content || []).find(c => c.type === 'text')?.text || '';\n  const post = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));\n  if (!post.title || !post.body) throw new Error('Claude reply missing title/body');\n  const story = $('Keep 3 Newest').all()[i].json;\n  return { json: { title: post.title, summary: post.body, sourceUrl: story.link, _status: 'draft' } };\n});"
+        "jsCode": "// Turn each AI reply into a Payload draft, rejecting replies that are unusable.\n// Same checks as the Node.js version (src/writers/blogPostPrompt.js).\nconst MINIMUM_WORDS = 120;\nconst MAXIMUM_WORDS = 500;\nconst stories = $('Keep 3 Newest').all();\n\nreturn $input.all().map((item, index) => {\n  if (item.json.error) throw new Error(`OpenRouter error: ${item.json.error.message}`);\n  const replyText = item.json.choices?.[0]?.message?.content ?? '';\n  const post = JSON.parse(replyText.slice(replyText.indexOf('{'), replyText.lastIndexOf('}') + 1));\n\n  const wordCount = String(post.body ?? '').split(/\\s+/).filter(Boolean).length;\n  if (!post.title || wordCount < MINIMUM_WORDS || wordCount > MAXIMUM_WORDS) {\n    throw new Error(`Unusable AI reply (title: ${Boolean(post.title)}, words: ${wordCount})`);\n  }\n\n  return { json: { title: post.title, summary: post.body, sourceUrl: stories[index].json.link, _status: 'draft' } };\n});"
       },
       "name": "Shape Post",
       "type": "n8n-nodes-base.code",
@@ -175,7 +187,10 @@
           "id": "",
           "name": "Payload (header Authorization: users API-Key ...)"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     }
   ],
   "connections": {
@@ -227,14 +242,14 @@
       "main": [
         [
           {
-            "node": "Claude Writes Post",
+            "node": "AI Writes Post (OpenRouter)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Claude Writes Post": {
+    "AI Writes Post (OpenRouter)": {
       "main": [
         [
           {

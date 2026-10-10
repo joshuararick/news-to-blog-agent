@@ -1,6 +1,6 @@
 # 📰 News-to-Blog Agent
 
-**Every morning, find fresh local industry news, have Claude write a short blog post about it, and save it to your website as a draft for a human to approve.**
+**Every morning, find fresh local industry news, have an AI (Claude directly, or any model via OpenRouter) write a short blog post about it, and save it to your website as a draft for a human to approve.**
 
 Built for small businesses that want an active, locally relevant blog (good for SEO and trust) without writing every day.
 
@@ -19,7 +19,7 @@ Ships two ways, same logic:
 cp .env.example .env        # add your Anthropic key, industry, location
 npm run preview             # dry run: prints posts, saves nothing
 npm start                   # real run: saves drafts to PayloadCMS
-npm test                    # 28 tests, no network needed
+npm test                    # 38 tests, no network needed
 ```
 
 Requires Node 22.9+. **No dependencies.** Only the Node standard library.
@@ -28,7 +28,16 @@ Command-line flags override `.env`:
 
 ```bash
 node src/cli.js --industry "Roofing" --location "Austin TX" --max-posts 2 --dry-run --verbose
+node src/cli.js --ai-provider openrouter --dry-run     # needs OPENROUTER_API_KEY + OPENROUTER_MODEL
 ```
+
+### Choosing the AI
+| `AI_PROVIDER` | Needs | Why pick it |
+|---|---|---|
+| `anthropic` (default) | `ANTHROPIC_API_KEY` | Claude directly: simplest setup, one bill |
+| `openrouter` | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | One key for Claude, GPT, Grok, Llama...; swap models by editing one line |
+
+Both use the **same prompt and the same reply checks** (`src/writers/blogPostPrompt.js`), so switching models can never weaken the guardrails.
 
 Exit codes: `0` all good · `1` could not run (bad config, news unreachable) · `2` ran, but some posts failed. So cron and CI can alert on it.
 
@@ -53,9 +62,11 @@ Exit codes: `0` all good · `1` could not run (bad config, news unreachable) · 
   │   .findRecent         .hasSeen / limit           .writePostAbout       .publish     │
   └─────┬──────────────────────┬─────────────────────────┬─────────────────────┬──────┘
         ▼                      ▼                         ▼                     ▼
-  sources/               state/                    writers/              publishers/
-  googleNewsSource.js    seenStoryStore.js         claudePostWriter.js   payloadDraftPublisher.js
-  (free RSS)             (JSON file)               (Anthropic API)       consolePublisher.js (dry run)
+  sources/               state/                    writers/                  publishers/
+  googleNewsSource.js    seenStoryStore.js         createPostWriter.js       payloadDraftPublisher.js
+  (free RSS)             (JSON file)                ├ claudePostWriter.js    consolePublisher.js (dry run)
+                                                    ├ openRouterPostWriter.js
+                                                    └ blogPostPrompt.js (shared prompt + checks)
                                                          │
                                 support/http.js ◀────────┘  retries 429/5xx with exponential backoff
                                 support/errors.js           one error class per stage
@@ -64,14 +75,14 @@ Exit codes: `0` all good · `1` could not run (bad config, news unreachable) · 
 
 ### Design decisions
 
-- **Dependency injection.** `pipeline.js` receives *something that can* find stories, write posts and publish. It never imports Google, Claude or Payload. Result: the whole pipeline is tested with in-memory fakes, and moving to WordPress means writing one new publisher file.
+- **Dependency injection.** `pipeline.js` receives *something that can* find stories, write posts and publish. It never imports Google, Claude or Payload. Result: the whole pipeline is tested with in-memory fakes, and moving to WordPress means writing one new publisher file. (Proof: OpenRouter support was added without touching `pipeline.js`.)
 - **Validate config first.** A missing key fails in the first second with a fix-it message, before any API credit is spent.
 - **Failures are isolated per story.** A bad Claude reply skips *that* story, records why in the run summary, and the rest continue. Skipped stories aren't marked as seen, so they retry tomorrow.
 - **Retry only what can recover.** 429 and 5xx are retried with 1s → 2s → 4s waits. A 401 (bad key) fails immediately, because retrying won't fix it.
 - **Drafts, not auto-publish.** Nothing reaches the public site without a person clicking Publish.
-- **No invented facts.** The prompt restricts Claude to the story details, and replies are rejected if they're not valid JSON or fall outside 120–500 words.
+- **No invented facts.** The prompt restricts the AI to the story details, and replies are rejected if they're not valid JSON or fall outside 120–500 words.
 - **Never duplicates.** Posted links are remembered in a capped JSON file, written atomically (temp file + rename) so a crash can't corrupt it.
-- **Cheap by default.** Claude Haiku costs pennies a day; `CLAUDE_MODEL=claude-sonnet-5-5` for richer prose.
+- **Cheap by default.** Claude Haiku costs pennies a day; `CLAUDE_MODEL=claude-sonnet-5-5` for richer prose, or any model via OpenRouter.
 
 ---
 
@@ -87,9 +98,12 @@ Each run logs the admin link of every draft it creates.
 
 1. **Import** `n8n/workflow.n8n.json`.
 2. Create two **Header Auth** credentials:
-   - *Anthropic*: name `x-api-key`, value = your API key
+   - *OpenRouter*: name `Authorization`, value = `Bearer <your OpenRouter key>`
    - *Payload*: name `Authorization`, value = `users API-Key <key>`
-3. Edit the **Config** node (industry, location, site URL), run once, review the drafts, then **activate**.
+3. Edit the **Config** node: industry, location, site URL, and `aiModel` (a slug from https://openrouter.ai/models).
+4. Run once, review the drafts, then **activate**.
+
+The news, AI and Payload steps retry up to 3 times (2s apart), and **Shape Post** rejects AI replies that aren't valid JSON or fall outside 120–500 words, so a bad reply fails loudly instead of publishing junk.
 
 ---
 

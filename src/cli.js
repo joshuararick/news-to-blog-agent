@@ -12,7 +12,7 @@
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './support/logger.js';
 import { createGoogleNewsSource } from './sources/googleNewsSource.js';
-import { createClaudePostWriter } from './writers/claudePostWriter.js';
+import { createPostWriter } from './writers/createPostWriter.js';
 import { createPayloadDraftPublisher } from './publishers/payloadDraftPublisher.js';
 import { createConsolePublisher } from './publishers/consolePublisher.js';
 import { openSeenStoryStore } from './state/seenStoryStore.js';
@@ -33,12 +33,7 @@ async function main() {
   const summary = await runNewsToBlogPipeline({
     config,
     newsSource: createGoogleNewsSource(),
-    postWriter: createClaudePostWriter({
-      apiKey: config.claude.apiKey,
-      model: config.claude.model,
-      industry: config.industry,
-      location: config.location,
-    }),
+    postWriter: createPostWriter(config),
     publisher,
     seenStoryStore: await openSeenStoryStore(config.seenStoriesFilePath),
     logger,
