@@ -14,6 +14,8 @@ export const DEFAULT_CLAUDE_MODEL = 'claude-haiku-5-5';
 export const DEFAULT_MAXIMUM_POSTS_PER_RUN = 3;
 export const DEFAULT_NEWS_LOOKBACK_DAYS = 7;
 export const DEFAULT_PAYLOAD_COLLECTION = 'posts';
+export const DEFAULT_PAYLOAD_BODY_FIELD = 'summary';
+export const SUPPORTED_PAYLOAD_BODY_FORMATS = ['plain', 'richtext'];
 export const DEFAULT_SEEN_STORIES_FILE = '.seen-stories.json';
 
 /**
@@ -27,8 +29,9 @@ export const DEFAULT_SEEN_STORIES_FILE = '.seen-stories.json';
  * @property {string} seenStoriesFilePath - Where already-posted links are remembered.
  * @property {{ provider: 'anthropic' | 'openrouter', apiKey: string, model: string }} writer
  *           - Which AI writes the posts, and the credentials for it.
- * @property {{ baseUrl: string, apiKey: string, collection: string } | null} payload
+ * @property {{ baseUrl: string, apiKey: string, collection: string, bodyField: string, bodyFormat: 'plain' | 'richtext' } | null} payload
  *           - Null during a dry run, when no CMS is needed.
+ * @property {string | null} alertWebhookUrl - Slack/Discord-style webhook to ping when a run fails.
  */
 
 /**
@@ -81,6 +84,42 @@ function requireEnvironmentVariable(environment, variableName) {
   const value = environment[variableName]?.trim();
   if (!value) {
     throw new ConfigurationError(`Missing ${variableName}. Add it to your environment or .env file (see .env.example).`);
+  }
+  return value;
+}
+
+/**
+ * "plain" for a textarea field, "richtext" for Payload's Lexical editor.
+ * @param {string | undefined} rawValue
+ * @returns {'plain' | 'richtext'}
+ */
+function readPayloadBodyFormat(rawValue) {
+  const bodyFormat = rawValue?.trim().toLowerCase() || 'plain';
+  if (!SUPPORTED_PAYLOAD_BODY_FORMATS.includes(bodyFormat)) {
+    throw new ConfigurationError(
+      `PAYLOAD_BODY_FORMAT must be one of: ${SUPPORTED_PAYLOAD_BODY_FORMATS.join(', ')} (got "${rawValue}")`);
+  }
+  return bodyFormat;
+}
+
+/**
+ * An optional setting that, when present, must be an https:// URL.
+ * @param {string | undefined} rawValue
+ * @param {string} settingName
+ * @returns {string | null}
+ */
+function readOptionalHttpsUrl(rawValue, settingName) {
+  const value = rawValue?.trim();
+  if (!value) return null;
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(value);
+  } catch {
+    throw new ConfigurationError(`${settingName} is not a valid URL`);
+  }
+  if (parsedUrl.protocol !== 'https:') {
+    throw new ConfigurationError(`${settingName} must start with https://`);
   }
   return value;
 }
@@ -142,6 +181,8 @@ export function loadConfig({ environment, commandLineArguments }) {
     baseUrl: requireEnvironmentVariable(environment, 'PAYLOAD_URL').replace(/\/+$/, ''),
     apiKey: requireEnvironmentVariable(environment, 'PAYLOAD_API_KEY'),
     collection: environment.PAYLOAD_COLLECTION?.trim() || DEFAULT_PAYLOAD_COLLECTION,
+    bodyField: environment.PAYLOAD_BODY_FIELD?.trim() || DEFAULT_PAYLOAD_BODY_FIELD,
+    bodyFormat: readPayloadBodyFormat(environment.PAYLOAD_BODY_FORMAT),
   };
 
   return Object.freeze({
@@ -156,5 +197,6 @@ export function loadConfig({ environment, commandLineArguments }) {
     seenStoriesFilePath: environment.SEEN_STORIES_FILE?.trim() || DEFAULT_SEEN_STORIES_FILE,
     writer: Object.freeze(readWriterSettings(environment, flags['ai-provider'])),
     payload: payloadSettings && Object.freeze(payloadSettings),
+    alertWebhookUrl: readOptionalHttpsUrl(environment.ALERT_WEBHOOK_URL, 'ALERT_WEBHOOK_URL'),
   });
 }

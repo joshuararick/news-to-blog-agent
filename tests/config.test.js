@@ -74,3 +74,18 @@ test('the --ai-provider flag wins, and unknown providers are rejected', () => {
     () => loadConfig({ environment: { ...COMPLETE_ENVIRONMENT, AI_PROVIDER: 'skynet' }, commandLineArguments: [] }),
     /Unknown AI provider "skynet"/);
 });
+
+test('Payload body field/format and alert webhook are read and validated', () => {
+  const config = loadConfig({
+    environment: { ...COMPLETE_ENVIRONMENT, PAYLOAD_BODY_FIELD: 'content', PAYLOAD_BODY_FORMAT: 'RichText', ALERT_WEBHOOK_URL: 'https://hooks.example/x' },
+    commandLineArguments: [],
+  });
+  assert.deepEqual([config.payload.bodyField, config.payload.bodyFormat], ['content', 'richtext']);
+  assert.equal(config.alertWebhookUrl, 'https://hooks.example/x');
+
+  const defaults = loadConfig({ environment: COMPLETE_ENVIRONMENT, commandLineArguments: [] });
+  assert.deepEqual([defaults.payload.bodyField, defaults.payload.bodyFormat, defaults.alertWebhookUrl], ['summary', 'plain', null]);
+
+  assert.throws(() => loadConfig({ environment: { ...COMPLETE_ENVIRONMENT, PAYLOAD_BODY_FORMAT: 'html' }, commandLineArguments: [] }), /PAYLOAD_BODY_FORMAT/);
+  assert.throws(() => loadConfig({ environment: { ...COMPLETE_ENVIRONMENT, ALERT_WEBHOOK_URL: 'http://insecure.example' }, commandLineArguments: [] }), /https/);
+});

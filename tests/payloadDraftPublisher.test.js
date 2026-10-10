@@ -31,3 +31,18 @@ test('rejections become PublisherError naming the post', async () => {
   await assert.rejects(publisher.publish(POST, STORY), error =>
     error instanceof PublisherError && /Rebates are here/.test(error.message));
 });
+
+test('rich-text mode stores Lexical JSON in the configured field', () => {
+  const document = buildPayloadDraftDocument(
+    { title: 'T', body: 'One.\n\nTwo.' }, STORY, { bodyField: 'content', bodyFormat: 'richtext' });
+  assert.equal('summary' in document, false);
+  assert.equal(document.content.root.children.length, 2);
+  assert.equal(document._status, 'draft');
+});
+
+test('publisher sends the rich-text document when configured', async () => {
+  const { fetchImplementation, calls } = makeScriptedFetch([makeFakeResponse({ status: 201, body: { doc: { id: 7 } } })]);
+  const publisher = createPayloadDraftPublisher({ ...SETTINGS, bodyField: 'content', bodyFormat: 'richtext', fetchImplementation });
+  await publisher.publish({ title: 'T', body: 'Hello' }, STORY);
+  assert.equal(JSON.parse(calls[0].options.body).content.root.children[0].children[0].text, 'Hello');
+});

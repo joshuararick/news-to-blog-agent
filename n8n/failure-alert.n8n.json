@@ -1,0 +1,57 @@
+{
+  "name": "News-to-Blog Failure Alert",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "When Any Run Fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "when-any-run-fails"
+    },
+    {
+      "parameters": {
+        "fromEmail": "automations@YOUR-DOMAIN.com",
+        "toEmail": "OWNER@YOUR-DOMAIN.com",
+        "subject": "=⚠️ Blog automation failed: {{ $json.workflow.name }}",
+        "emailFormat": "text",
+        "text": "=The daily blog automation stopped with an error, so today's posts may be missing.\n\nWorkflow: {{ $json.workflow.name }}\nFailed step: {{ $json.execution.lastNodeExecuted }}\nError: {{ $json.execution.error.message }}\nWhen: {{ $now.toFormat('yyyy-MM-dd HH:mm') }}\n\nOpen the failed run: {{ $json.execution.url }}\n\nStories that failed are retried automatically on the next run.",
+        "options": {}
+      },
+      "name": "Email the Owner",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        0
+      ],
+      "id": "email-the-owner",
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "SMTP (your email provider)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Any Run Fails": {
+      "main": [
+        [
+          {
+            "node": "Email the Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

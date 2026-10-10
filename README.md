@@ -19,7 +19,7 @@ Ships two ways, same logic:
 cp .env.example .env        # add your Anthropic key, industry, location
 npm run preview             # dry run: prints posts, saves nothing
 npm start                   # real run: saves drafts to PayloadCMS
-npm test                    # 38 tests, no network needed
+npm test                    # 51 tests, no network needed
 ```
 
 Requires Node 22.9+. **No dependencies.** Only the Node standard library.
@@ -39,7 +39,10 @@ node src/cli.js --ai-provider openrouter --dry-run     # needs OPENROUTER_API_KE
 
 Both use the **same prompt and the same reply checks** (`src/writers/blogPostPrompt.js`), so switching models can never weaken the guardrails.
 
-Exit codes: `0` all good · `1` could not run (bad config, news unreachable) · `2` ran, but some posts failed. So cron and CI can alert on it.
+Exit codes: `0` all good · `1` could not run (bad config, news unreachable) · `2` ran, but some posts failed.
+
+### Failure alerts
+Set `ALERT_WEBHOOK_URL` to a Slack or Discord incoming-webhook URL. When a run fails or skips posts, a short message names what failed and why. A broken alert channel is logged and never hides the original error.
 
 ### Run it daily
 ```cron
@@ -64,11 +67,13 @@ Exit codes: `0` all good · `1` could not run (bad config, news unreachable) · 
         ▼                      ▼                         ▼                     ▼
   sources/               state/                    writers/                  publishers/
   googleNewsSource.js    seenStoryStore.js         createPostWriter.js       payloadDraftPublisher.js
-  (free RSS)             (JSON file)                ├ claudePostWriter.js    consolePublisher.js (dry run)
+  (free RSS)             (JSON file)                ├ claudePostWriter.js    lexicalRichText.js (rich text)
+                                                    │                        consolePublisher.js (dry run)
                                                     ├ openRouterPostWriter.js
                                                     └ blogPostPrompt.js (shared prompt + checks)
                                                          │
                                 support/http.js ◀────────┘  retries 429/5xx with exponential backoff
+                                support/failureAlert.js     Slack/Discord ping when a run fails
                                 support/errors.js           one error class per stage
                                 support/logger.js           timestamped, levelled output
 ```
@@ -88,9 +93,17 @@ Exit codes: `0` all good · `1` could not run (bad config, news unreachable) · 
 
 ## PayloadCMS setup
 
-1. On your posts collection: `versions: { drafts: true }`, plus fields `title` (text), `summary` (textarea), `sourceUrl` (text).
-2. On your users collection: `auth: { useAPIKey: true }`, then generate a key for a bot user.
-3. Put `PAYLOAD_URL` and `PAYLOAD_API_KEY` in `.env`.
+1. On your posts collection: `versions: { drafts: true }`, plus fields `title` (text), `sourceUrl` (text), and an article field.
+2. Tell the agent which article field to fill and how it stores text:
+
+   | Your article field | Settings |
+   |---|---|
+   | `summary`, a textarea (default) | nothing to set |
+   | `content`, Payload's rich-text editor (most blogs) | `PAYLOAD_BODY_FIELD=content` · `PAYLOAD_BODY_FORMAT=richtext` |
+
+   In rich-text mode each paragraph is converted into the editor's own JSON format (Lexical), so posts open in the Payload editor ready to tweak.
+3. On your users collection: `auth: { useAPIKey: true }`, then generate a key for a bot user.
+4. Put `PAYLOAD_URL` and `PAYLOAD_API_KEY` in `.env`.
 
 Each run logs the admin link of every draft it creates.
 
@@ -100,15 +113,21 @@ Each run logs the admin link of every draft it creates.
 2. Create two **Header Auth** credentials:
    - *OpenRouter*: name `Authorization`, value = `Bearer <your OpenRouter key>`
    - *Payload*: name `Authorization`, value = `users API-Key <key>`
-3. Edit the **Config** node: industry, location, site URL, and `aiModel` (a slug from https://openrouter.ai/models).
+3. Edit the **Config** node: industry, location, site URL, `aiModel` (a slug from https://openrouter.ai/models), `bodyField` and `bodyFormat` (`richtext` for Payload's rich-text editor, `plain` for a textarea).
 4. Run once, review the drafts, then **activate**.
+
+### Failure emails (n8n)
+1. Import `n8n/failure-alert.n8n.json` and add an **SMTP** credential (Gmail, Outlook and most providers offer SMTP).
+2. In its **Email the Owner** step, set the from and to addresses.
+3. Open the main workflow → **Settings** → **Error workflow** → choose **News-to-Blog Failure Alert**.
+
+From then on, any failed run emails the owner with the failed step, the error, and a link to the run.
 
 The news, AI and Payload steps retry up to 3 times (2s apart), and **Shape Post** rejects AI replies that aren't valid JSON or fall outside 120–500 words, so a bad reply fails loudly instead of publishing junk.
 
 ---
 
 ## Roadmap
-- Map posts into Payload's rich-text (Lexical) `content` field.
 - Fetch full article text for meatier posts.
 - More sources (industry RSS feeds, Reddit) behind the same `findRecentStories` interface.
 - Slack or email digest: "3 drafts are waiting for review".

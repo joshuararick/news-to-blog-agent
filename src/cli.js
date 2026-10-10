@@ -7,10 +7,12 @@
  *   node src/cli.js --industry "HVAC" --location "Greenville SC" --dry-run
  *
  * Exit codes: 0 = all good, 1 = could not run at all, 2 = ran but some posts failed.
+ * When ALERT_WEBHOOK_URL is set, exit codes 1 and 2 also send an alert.
  */
 
 import { loadConfig } from './config.js';
 import { createConsoleLogger } from './support/logger.js';
+import { sendFailureAlert, describeFatalFailure, describePartialFailure } from './support/failureAlert.js';
 import { createGoogleNewsSource } from './sources/googleNewsSource.js';
 import { createPostWriter } from './writers/createPostWriter.js';
 import { createPayloadDraftPublisher } from './publishers/payloadDraftPublisher.js';
@@ -22,10 +24,12 @@ const EXIT_CODE_SUCCESS = 0;
 const EXIT_CODE_FATAL_ERROR = 1;
 const EXIT_CODE_PARTIAL_FAILURE = 2;
 
-async function main() {
-  const config = loadConfig({ environment: process.env, commandLineArguments: process.argv.slice(2) });
-  const logger = createConsoleLogger({ verbose: config.isVerbose });
-
+/**
+ * @param {import('./config.js').PipelineConfig} config
+ * @param {import('./support/logger.js').Logger} logger
+ * @returns {Promise<number>} Exit code.
+ */
+async function runOnce(config, logger) {
   const publisher = config.isDryRun
     ? createConsolePublisher()
     : createPayloadDraftPublisher(config.payload);
@@ -39,12 +43,38 @@ async function main() {
     logger,
   });
 
-  return summary.postsFailed.length > 0 ? EXIT_CODE_PARTIAL_FAILURE : EXIT_CODE_SUCCESS;
+  if (summary.postsFailed.length === 0) {
+    return EXIT_CODE_SUCCESS;
+  }
+
+  await sendFailureAlert({
+    webhookUrl: config.alertWebhookUrl,
+    message: describePartialFailure(summary, config),
+    logger,
+  });
+  return EXIT_CODE_PARTIAL_FAILURE;
 }
 
-main()
-  .then(exitCode => { process.exitCode = exitCode; })
-  .catch(error => {
+async function main() {
+  // Config errors are reported on screen only: without valid config there is
+  // no trustworthy alert destination yet, and they surface the first time a
+  // person sets the tool up.
+  let config;
+  try {
+    config = loadConfig({ environment: process.env, commandLineArguments: process.argv.slice(2) });
+  } catch (error) {
     console.error(`✘ ${error.name ?? 'Error'}: ${error.message}`);
-    process.exitCode = EXIT_CODE_FATAL_ERROR;
-  });
+    return EXIT_CODE_FATAL_ERROR;
+  }
+
+  const logger = createConsoleLogger({ verbose: config.isVerbose });
+  try {
+    return await runOnce(config, logger);
+  } catch (error) {
+    logger.error(`${error.name ?? 'Error'}: ${error.message}`);
+    await sendFailureAlert({ webhookUrl: config.alertWebhookUrl, message: describeFatalFailure(error), logger });
+    return EXIT_CODE_FATAL_ERROR;
+  }
+}
+
+main().then(exitCode => { process.exitCode = exitCode; });
